@@ -1,7 +1,7 @@
 import math
 import random
-from original_demo.generate_matrix import load_matrices_from_file
-from original_demo.generate_flow import load_flows_from_file
+from generate_matrix import load_matrices_from_file
+from generate_flow import load_flows_from_file
 import copy
 import os
 import json
