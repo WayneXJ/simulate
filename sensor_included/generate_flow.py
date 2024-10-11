@@ -81,13 +81,12 @@ def generate_periodic_flows(node_ids, num_flows, file_path, end_node, total_dema
             demand = min(demand_per_flow, total_demand_per_node - generated_demand)
             start_time = current_time
             end_time = min(current_time + last_time, time_range[1])
-
             flow = Flow(start_node, end_node, demand, start_time, end_time)
             flows.append(flow)
             generated_demand += demand
             current_time += period  # 更新为下一个周期的开始时间
 
-            if current_time > time_range[1]:  # 如果时间超出范围，结束生成
+            if current_time >= time_range[1]:  # 如果时间超出范围，结束生成
                 break
 
     # 按开始时间排序
@@ -160,7 +159,7 @@ def generate_multiple_sensor_flow_files(node_list, num_flows, base_dir):
         print(f"------------------sensor_{num_node}------------------------")
         print(f"Generating {num_flows} flows for {num_node} nodes...")
         generate_periodic_flows(node_ids, num_flows, file_path, end_node=0, total_demand=3600,
-                                demand_per_flow=20, time_range=(0, 40), period=8, last_time=6)
+                                demand_per_flow=15, time_range=(0, 40), period=8, last_time=6)
         print(f"Flows saved to {file_path}")
 
         sink_flows = load_flows_from_file(file_path)
@@ -176,13 +175,13 @@ def generate_multiple_sensor_flow_files(node_list, num_flows, base_dir):
 
 def main():
     # 节点数列表
-    node_list = [7, 8, 9, 10]
+    node_list = [7, 8, 9, 10, 13, 21]
 
     # 流量倍数（用于控制生成的流量数，流量数 = 节点数 * 流量倍数）
     flow_multiplier = 10
 
     # 流量需求范围
-    demand_range = (1, 10)
+    demand_range = (1, 5)
 
     # 时间范围
     time_range = (0, 40)

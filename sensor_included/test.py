@@ -6,7 +6,7 @@ import copy
 import os
 import json
 import matplotlib.pyplot as plt
-from original_demo import output
+import output
 import flow_calculate as fc
 
 '''
@@ -14,6 +14,8 @@ import flow_calculate as fc
 无人机带宽有限，存储无限  or    无人机存储有限，可以转发
 传完和利用率是针对无人机而言的，利用无人机的有限窗口进行通信
 '''
+
+# TODO 需要加一个GA模型进行流量分配的，同时还需要加一个随机排序的流量分配的结果
 class Node:
     def __init__(self, node_id, x, y, x_seq, y_seq):
         self.node_id = node_id
@@ -137,7 +139,7 @@ def get_edge_with_UAV(nodes, edges, edge_capacity, num, time):
             if is_in_UAV(node1, time):
                 edges[(node1.node_id, node2.node_id)].append(60)
             else:
-                edges[(node1.node_id, node2.node_id)].append(int(edge_capacity / node1.distance_to(node2)))
+                edges[(node1.node_id, node2.node_id)].append(int(edge_capacity / (node1.distance_to(node2) * node1.distance_to(node2))))
             # print(node1.node_id,"--->",node2.node_id," dis:",node1.distance_to(node2),int(edge_capacity / node1.distance_to(node2)))
 
 
@@ -147,20 +149,21 @@ def get_edge(nodes, edges, edge_capacity, num, time):
         for j in range(i + 1, num):
             node1 = nodes[i]
             node2 = nodes[j]
-            edges[(node1.node_id, node2.node_id)].append(int(edge_capacity / node1.distance_to(node2)))
+            edges[(node1.node_id, node2.node_id)].append(int(edge_capacity / (node1.distance_to(node2) * node1.distance_to(node2))))
 
 
+# TODO 需要对UAV的活动范围进行调整
 def is_in_UAV(node, time):
     time_zones = {    # 14, 18, 22 有一个停顿取流量
-        11: (0, 5, 0, 5),
-        12: (5, 10, 0, 5),
-        13: (10, 15, 0, 5),
-        15: (10, 15, 5, 10),
-        16: (5, 10, 5, 10),
-        17: (0, 5, 5, 10),
-        19: (0, 5, 10, 15),
-        20: (5, 10, 10, 15),
-        21: (10, 15, 10, 15)
+        11: (0, 7, 0, 7),
+        12: (7, 14, 0, 7),
+        13: (14, 21, 0, 7),
+        15: (14, 21, 7, 14),
+        16: (7, 14, 7, 14),
+        17: (0, 7, 7, 14),
+        19: (0, 7, 14, 21),
+        20: (7, 14, 14, 21),
+        21: (14, 21, 14, 21)
     }
 
     # 检查当前时间是否在定义的时段内
@@ -188,7 +191,7 @@ def init_edge(nodes, edge_capacity, num):
         for j in range(i + 1, num):
             node1 = nodes[i]
             node2 = nodes[j]
-            edges[(node1.node_id, node2.node_id)] = [int(edge_capacity / node1.distance_to(node2))]
+            edges[(node1.node_id, node2.node_id)] = [int(edge_capacity / (node1.distance_to(node2) *node1.distance_to(node2)))]
     return edges
 
 
@@ -231,6 +234,7 @@ def flow_result_json(flow,maxflow, demand_flow, path, flag, results):
 def get_count_with_sensor(flows, all_flow, all_flow_to_zero, num_nodes, time_steps, graph, time_count, output_flow_file):
     print("-----------------sensor---------------")
     finish_count = [0] * time_count
+    unfinish_rate = [0] * 101
     flow_count = [0] * time_count
     results = []
     fc.print_graph(graph)
@@ -250,6 +254,17 @@ def get_count_with_sensor(flows, all_flow, all_flow_to_zero, num_nodes, time_ste
             NT = generate_list(num_nodes, time_steps, flow.start_node)
             maxflow, demand_flow, path, flag = fc.edmonds_karp(graph, flow.start_node, flow.end_node,
                                                                NT, flow.start_time, flow.end_time, flow.demand)
+            maxflow_count = calculate_list_all(maxflow)
+            demand_flow_count = calculate_list_all(demand_flow)
+            if demand_flow_count == 0 and maxflow_count == 0:
+                print(maxflow)
+                print(demand_flow)
+                print(flow.start_time)
+                print(flow.end_time)
+                print(flow.demand)
+            md_rate = demand_flow_count*100 // (demand_flow_count + maxflow_count)
+            if md_rate != 100:
+                unfinish_rate[md_rate] = unfinish_rate[md_rate] + 1
             for i in range(len(maxflow)):
                 print("i + start_time:", i, flow.start_time)
                 all_flow[i + flow.start_time] += maxflow[i]
@@ -271,7 +286,7 @@ def get_count_with_sensor(flows, all_flow, all_flow_to_zero, num_nodes, time_ste
                     break  # 找到对应区间后，跳出循环
 
     output.output_flow_results(output_flow_file, results)
-    return flow_count, finish_count
+    return flow_count, finish_count, unfinish_rate
 
 
 # 利用率优先算法
@@ -279,6 +294,7 @@ def get_count_with_sensor(flows, all_flow, all_flow_to_zero, num_nodes, time_ste
 def get_count_usage_priority_with_random(flows_random, all_flow, all_flow_to_zero, num_nodes, time_steps, graph, time_count, output_flow_file):
     print("--------------usage_priority---------------")
     finish_count = [0] * time_count
+    unfinish_rate = [0] * 101
     flow_count = [0] * time_count
     results = []
     fc.print_graph(graph)
@@ -290,6 +306,11 @@ def get_count_usage_priority_with_random(flows_random, all_flow, all_flow_to_zer
         NT = generate_list(num_nodes, time_steps, flow.start_node)
         maxflow, demand_flow, path, flag = fc.edmonds_karp(graph, flow.start_node, flow.end_node,
                                                            NT, flow.start_time, flow.end_time, flow.demand)
+        maxflow_count = calculate_list_all(maxflow)
+        demand_flow_count = calculate_list_all(demand_flow)
+        md_rate = demand_flow_count * 100 // (demand_flow_count + maxflow_count)
+        if md_rate != 100:
+            unfinish_rate[md_rate] = unfinish_rate[md_rate] + 1
         for i in range(len(maxflow)):
             print("i + start_time:", i, flow.start_time)
             all_flow[i + flow.start_time] += maxflow[i]
@@ -311,7 +332,7 @@ def get_count_usage_priority_with_random(flows_random, all_flow, all_flow_to_zer
                 break  # 找到对应区间后，跳出循环
 
     output.output_flow_results(output_flow_file, results)
-    return flow_count, finish_count
+    return flow_count, finish_count, unfinish_rate
 
 
 # 完成优先
@@ -319,6 +340,7 @@ def get_count_usage_priority_with_random(flows_random, all_flow, all_flow_to_zer
 def get_count_completed_priority_with_random(flows_random, all_flow, all_flow_to_zero, num_nodes, time_steps, graph, time_count, output_flow_file):
     print("--------------completed_priority---------------")
     finish_count = [0] * time_count
+    unfinish_rate = [0] * 101
     flow_count = [0] * time_count
     results = []
     fc.print_graph(graph)
@@ -330,6 +352,11 @@ def get_count_completed_priority_with_random(flows_random, all_flow, all_flow_to
         NT = generate_list(num_nodes, time_steps, flow.start_node)
         maxflow, demand_flow, path, flag = fc.edmonds_karp(graph, flow.start_node, flow.end_node,
                                                            NT, flow.start_time, flow.end_time, flow.demand)
+        maxflow_count = calculate_list_all(maxflow)
+        demand_flow_count = calculate_list_all(demand_flow)
+        md_rate = demand_flow_count * 100 // (demand_flow_count + maxflow_count)
+        if md_rate != 100:
+            unfinish_rate[md_rate] = unfinish_rate[md_rate] + 1
         for i in range(len(maxflow)):
             all_flow[i + flow.start_time] += maxflow[i]
             if flow.end_node == 0:
@@ -350,7 +377,7 @@ def get_count_completed_priority_with_random(flows_random, all_flow, all_flow_to
                 break  # 找到对应区间后，跳出循环
 
     output.output_flow_results(output_flow_file, results)
-    return flow_count, finish_count
+    return flow_count, finish_count, unfinish_rate
 
 
 def calculate_list_all(count_list):
@@ -365,6 +392,7 @@ def get_count_without_UAV(flows_random, all_flow, all_flow_to_zero, num_nodes, t
                              output_flow_file):
     print("--------------Without UAV---------------")
     finish_count = [0] * time_count
+    unfinish_rate = [0] * 101
     flow_count = [0] * time_count
     results = []
     fc.print_graph(graph)
@@ -376,6 +404,11 @@ def get_count_without_UAV(flows_random, all_flow, all_flow_to_zero, num_nodes, t
         NT = generate_list(num_nodes, time_steps, flow.start_node)
         maxflow, demand_flow, path, flag = fc.edmonds_karp(graph, flow.start_node, flow.end_node,
                                                            NT, flow.start_time, flow.end_time, flow.demand)
+        maxflow_count = calculate_list_all(maxflow)
+        demand_flow_count = calculate_list_all(demand_flow)
+        md_rate = demand_flow_count * 100 // (demand_flow_count + maxflow_count)
+        if md_rate != 100:
+            unfinish_rate[md_rate] = unfinish_rate[md_rate] + 1
         for i in range(len(maxflow)):
             all_flow[i + flow.start_time] += maxflow[i]
             if flow.end_node == 0:
@@ -396,7 +429,32 @@ def get_count_without_UAV(flows_random, all_flow, all_flow_to_zero, num_nodes, t
                 break  # 找到对应区间后，跳出循环
 
     output.output_flow_results(output_flow_file, results)
-    return flow_count, finish_count
+    return flow_count, finish_count, unfinish_rate
+
+
+def calculate_count(count_list, stage):
+    # 计算每一部分的基本大小和剩余的元素数量
+    n = len(count_list)
+    base_size = n // stage  # 每个部分的基础大小
+    remainder = n % stage   # 不能整除的剩余部分
+
+    # 结果列表，初始化为空
+    result = []
+
+    # 索引标记
+    index = 0
+
+    # 将count_list划分并求和
+    for i in range(stage):
+        # 当前部分的大小，最后一个部分加上余数
+        current_size = base_size + (1 if i < remainder else 0)
+        # 计算当前部分的和
+        part_sum = sum(count_list[index:index + current_size])
+        result.append(part_sum)
+        # 更新索引
+        index += current_size
+
+    return result
 
 
 def simulate_multiple_flows(nodes, flows_random, flows_sensor, edges, num_nodes, node_range, edge_capacity, time_steps, time_set, move_algorithm,
@@ -433,16 +491,35 @@ def simulate_multiple_flows(nodes, flows_random, flows_sensor, edges, num_nodes,
     print("---------------graph3----------------------------")
     fc.print_graph(graph3)
 
-    flow_count_sensor1, finish_count_sensor1 = get_count_with_sensor(flows_sensor, all_flow_usage_priority, all_flow_usage_priority_to_zero, num_nodes, time_steps, graph1, time_count,
+    flow_count_sensor1, finish_count_sensor1, unfinish_rate_sensor1 = get_count_with_sensor(flows_sensor, all_flow_usage_priority, all_flow_usage_priority_to_zero, num_nodes, time_steps, graph1, time_count,
                                                           output_flow_file)
-    flow_count1, finish_count1 = get_count_usage_priority_with_random(flows_random, all_flow_usage_priority, all_flow_usage_priority_to_zero, num_nodes, time_steps, graph1, time_count,
+    flow_count1, finish_count1, unfinish_rate_1 = get_count_usage_priority_with_random(flows_random, all_flow_usage_priority, all_flow_usage_priority_to_zero, num_nodes, time_steps, graph1, time_count,
                                                           output_flow_file)
-    flow_count_sensor2, finish_count_sensor2 = get_count_with_sensor(flows_sensor, all_flow_completed_priority, all_flow_completed_priority_to_zero, num_nodes, time_steps, graph2, time_count,
+    flow_count_sensor2, finish_count_sensor2, unfinish_rate_sensor2 = get_count_with_sensor(flows_sensor, all_flow_completed_priority, all_flow_completed_priority_to_zero, num_nodes, time_steps, graph2, time_count,
                                                               output_flow_file)
-    flow_count2, finish_count2 = get_count_completed_priority_with_random(flows_random, all_flow_completed_priority, all_flow_completed_priority_to_zero, num_nodes, time_steps, graph2, time_count,
+    flow_count2, finish_count2, unfinish_rate_2 = get_count_completed_priority_with_random(flows_random, all_flow_completed_priority, all_flow_completed_priority_to_zero, num_nodes, time_steps, graph2, time_count,
                                                               output_flow_file)
-    flow_count3, finish_count3 = get_count_without_UAV(flows_random, all_flow_without_UAV, all_flow_without_UAV_to_zero, num_nodes, time_steps, graph3, time_count,
+    flow_count3, finish_count3, unfinish_rate_3 = get_count_without_UAV(flows_random, all_flow_without_UAV, all_flow_without_UAV_to_zero, num_nodes, time_steps, graph3, time_count,
                                                               output_flow_file)
+
+    print("没有加起来之前的unfinish_rate_1:", unfinish_rate_1)
+    print("没有加起来之前的unfinish_rate_2:", unfinish_rate_2)
+    unfinish_rate_1 = [x + y for x, y in zip(unfinish_rate_sensor1, unfinish_rate_1)]
+    unfinish_rate_2 = [x + y for x, y in zip(unfinish_rate_sensor2, unfinish_rate_2)]
+    print("unfinish_rate_1:", unfinish_rate_1)
+    print("unfinish_rate_2:", unfinish_rate_2)
+    print("unfinish_rate_3:", unfinish_rate_3)
+
+    plot_unfinish_rate(num_nodes, unfinish_rate_1, unfinish_rate_2, unfinish_rate_3)
+
+    unfinish_rate_1 = calculate_count(unfinish_rate_1, 5)
+    unfinish_rate_2 = calculate_count(unfinish_rate_2, 5)
+    unfinish_rate_3 = calculate_count(unfinish_rate_3, 5)
+    print("----------------------分组后----------------")
+    print("unfinish_rate_1:", unfinish_rate_1)
+    print("unfinish_rate_2:", unfinish_rate_2)
+    print("unfinish_rate_3:", unfinish_rate_3)
+    plot_unfinish_rate(num_nodes, unfinish_rate_1, unfinish_rate_2, unfinish_rate_3)
 
     for flow in flows_sensor:
         if flow.end_node == 0:
@@ -463,11 +540,11 @@ def simulate_multiple_flows(nodes, flows_random, flows_sensor, edges, num_nodes,
     print("without_UAV_flow_count2:", flow_count3)
     print("without_UAV_finish_count2:", finish_count3)
 
-    # print("流量总和")
-    # print(calculate_list_all(all_of_flows))
-    # print(calculate_list_all(all_flow_usage_priority_to_zero))
-    # print(calculate_list_all(all_flow_completed_priority_to_zero))
-    # print(calculate_list_all(all_flow_without_UAV_to_zero))
+    print("流量总和")
+    print(calculate_list_all(all_of_flows))
+    print(calculate_list_all(all_flow_usage_priority_to_zero))
+    print(calculate_list_all(all_flow_completed_priority_to_zero))
+    print(calculate_list_all(all_flow_without_UAV_to_zero))
 
 
     return flow_count1, finish_count1, flow_count2, finish_count2, flow_count3, finish_count3, \
@@ -475,13 +552,13 @@ def simulate_multiple_flows(nodes, flows_random, flows_sensor, edges, num_nodes,
 
 
 def get_multiple_result(node_list, edge_capacity, output_file, matrices_dir, random_flow_dir, sensor_flow_dir, output_dir):
-    for num_node in node_list:
+    for node in node_list:
         # 文件地址
-        matrices_file = os.path.join(matrices_dir, f'matrices_{num_node}.npy')
-        random_flow_file = os.path.join(random_flow_dir, f'random_flows_{num_node}.json')
-        sensor_flow_file = os.path.join(sensor_flow_dir, f'sink_flows_{num_node}.json')
-        output_flow_file = os.path.join(output_dir, f'flow_results_{num_node}.json')
-        output_result_file = os.path.join(output_dir, f'results_{num_node}.json')
+        matrices_file = os.path.join(matrices_dir, f'matrices_{node}.npy')
+        random_flow_file = os.path.join(random_flow_dir, f'random_flows_{node}.json')
+        sensor_flow_file = os.path.join(sensor_flow_dir, f'sink_flows_{node}.json')
+        output_flow_file = os.path.join(output_dir, f'flow_results_{node}.json')
+        output_result_file = os.path.join(output_dir, f'results_{node}.json')
 
         #读取矩阵
         loaded_matrices = load_matrices_from_file(matrices_file)
@@ -635,9 +712,31 @@ def plot_results(num_node, af1, af2, af3):
     plt.show()
 
 
+def plot_unfinish_rate(num_node, af1, af2, af3):
+    x_values = range(len(af1))  # 横坐标为索引值
+
+    plt.figure(figsize=(10, 6))
+
+    # 绘制 af1，af2，af3 的折线图
+    plt.plot(x_values, af1, label=f'uf1 (num_node={num_node})', color='blue', marker='o')
+    plt.plot(x_values, af2, label=f'uf2 (num_node={num_node})', color='green', marker='s')
+    plt.plot(x_values, af3, label=f'uf3 (num_node={num_node})', color='red', marker='^')
+
+    # 添加图例、标题和标签
+    plt.legend()
+    plt.title(f"Unfinish rate for num_node={num_node}")
+    plt.xlabel("Index")
+    plt.ylabel("number")
+
+    # 显示网格
+    plt.grid(True)
+
+    # 显示图表
+    plt.show()
+
 def main():
     # 读取的文件序号列表
-    node_list = [7, 8, 9, 10]
+    node_list = [7, 8, 9, 10, 13, 21]
 
     # 文件地址
     matrices_dir = 'matrices'
@@ -656,7 +755,7 @@ def main():
 
     output_result_file = os.path.join('output', 'results_9.json')
 
-    load_results_and_plot(file_path='flow_results.json', test='test1', num_node=9)
+    load_results_and_plot(output_result_file, test='test1', num_node=12)
 
 
 

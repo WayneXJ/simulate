@@ -140,8 +140,7 @@ def bfs_without_sensor(graph, source, target, n, h, start_time, path):
     visited1 = [False] * (len(graph) - 3)
     visited2 = [True] * 3
     visited = visited1 + visited2
-    print("len of graph:",len(graph))
-    print("source:",source)
+
     queue = deque()
     path_list = []
     queue.append((source, visited, [[h, source]]))
@@ -209,17 +208,22 @@ def edmonds_karp(graph, source, target, n, start_time, end_time, demand):
     demand_flow = [demand]*h
     demand_flow[h-1] = 0
     path = []
+
     l_all = bfs_without_sensor(r_graph, source, target, n, h, start_time, path)
+    # l_all = bfs(r_graph, source, target, n, h, start_time, path)
     if l_all != []:
         for l_i, time in l_all:
-            # print("l_i:",l_i)
+            print("l_i:",l_i)
             path.append(l_i)
             tflow = get_tflow(l_i, r_graph, n, h, source, start_time, demand_flow)   # 得到一条路径的最大流
+            print("tflow:", tflow)
             demand_flow = get_demand_flow(tflow, demand_flow)
-
-            r_graph = get_res_network(l_i, tflow, r_graph, n, h, source, target, graph, start_time)  # 更新残余图
-
+            print("demand flow :", demand_flow)
+            r_graph, n = get_res_network(l_i, tflow, r_graph, n, h, source, target, graph, start_time)  # 更新残余图
+            print("n:", n)
+            print("tflow 2 :", tflow)
             max_flow = [x + y for x, y in zip(max_flow, tflow)]  # 计算最大流
+            print("max flow:", max_flow)
             if all_zero(demand_flow):
                 clear_graph(graph)
                 return max_flow, demand_flow, path, True
@@ -233,22 +237,23 @@ def edmonds_karp(graph, source, target, n, start_time, end_time, demand):
 
 
 def get_res_network(l_i, max_flow, r_graph, n, h, source, target, graph, start_time):
-    a = [[0] * h for _ in range(h)]
-    aflow = [0] * h
-    dflow = [0] * h
+
     tflow = [0] * h
     # 更新容量uv
     update_edge(source, l_i[2], r_graph, max_flow, h, start_time)
-
 
     son = [None] * len(graph)  # 子节点对父节点索引
     getson(l_i, son, target)  # 得到parent列表
     # print_graph(r_graph)
 
     for node in l_i[2:-1]:
+        a = [[0] * h for _ in range(h)]
+        aflow = [0] * h
+        dflow = [0] * h
+        n_change = [0] * (h - 1)
         tN_T = n[node].copy()  # 得到v点的存储序列拷贝
         if node == l_i[2]:
-            tflow_uv = max_flow
+            tflow_uv = max_flow.copy()
         else:
             tflow_uv = tflow.copy()
         cap_vw = get_cap(node, son[node], r_graph, h, start_time).copy()
@@ -266,12 +271,10 @@ def get_res_network(l_i, max_flow, r_graph, n, h, source, target, graph, start_t
                     tN_T[i] = tN_T[i] - a[q][p]
         for p in range(h):
             if p == 0:
-                dflow[p] = min(cap_vw[p] - aflow[p], sum(tflow_uv[:p+1]))
-
+                dflow[p] = min(cap_vw[p], sum(tflow_uv[:p+1]))
             else:
-                dflow[p] = min(cap_vw[p] - aflow[p], sum(tflow_uv[:p+1]) - sum(dflow[:p]))
+                dflow[p] = min(cap_vw[p], sum(tflow_uv[:p+1]) - sum(dflow[:p]))
             tflow[p] = aflow[p] + dflow[p]
-
 
         # 更新每条边的容量
         update_edge(node, son[node], r_graph, tflow, h, start_time)
@@ -279,20 +282,19 @@ def get_res_network(l_i, max_flow, r_graph, n, h, source, target, graph, start_t
         # print("tflow_uv:",tflow_uv,"tflow",tflow)
         for i in range(h-1):
             if i == 0:
-                n[node][i] = n[node][i] + tflow_uv[i] - tflow[i]
+                n_change[i] = tflow_uv[i] - dflow[i]
                 # print(n[node][i])
             else:
-                n[node][i] = n[node][i-1] + n[node][i] + tflow_uv[i] - tflow[i]
+                n_change[i] = n_change[i-1] + tflow_uv[i] - dflow[i]
                 # print(n[node][i])
-
+        n[node] = [x + y for x, y in zip(n_change, tN_T)]
         # print("node is in",node,":",n[node])
-        return r_graph
-    return r_graph
+    return r_graph, n
 
 
 def get_tflow(l_i, graph, n, h, source, start_time, flow):    # 计算最大流
     if len(l_i) == 3:
-        tflow = get_cap(l_i[1],l_i[2],graph,h,start_time)
+        tflow = get_cap(l_i[1], l_i[2], graph, h, start_time)
     else:
         bflow = [0]*h
         sflow = [0]*h
@@ -316,7 +318,7 @@ def get_tflow(l_i, graph, n, h, source, start_time, flow):    # 计算最大流
             cap_uv = get_cap(parent[node], node, graph, h, start_time).copy()
             # 计算
             for q in range(h):
-                for p in range(h):
+                for p in range(q):
                     bet = get_beta(tN_T, h)  # beta
                     b[q][p] = min(cap_uv[q], bet[q][p], tflow_vw[p])
                     # 计算反向可行流
@@ -328,11 +330,12 @@ def get_tflow(l_i, graph, n, h, source, start_time, flow):    # 计算最大流
                     tflow_vw[p] = tflow_vw[p] - b[q][p]
                     for i in range(p, q):
                         tN_T[i] = tN_T[i] - b[q][p]
+            # 计算正向传输的流量
             for q in range(h-1, -1, -1):
                 if q == h-1:
-                    sflow[q] = min(cap_uv[q] - bflow[q], sum(tflow_vw[q:]))
+                    sflow[q] = min(cap_uv[q], sum(tflow_vw[q:]))
                 else:
-                    sflow[q] = min(cap_uv[q] - bflow[q], sum(tflow_vw[q:]) - sum(sflow[q+1:]))
+                    sflow[q] = min(cap_uv[q], sum(tflow_vw[q:]) - sum(sflow[q+1:]))
                 tflow[q] = bflow[q] + sflow[q]
     # 判断流量是否符合约定，即传输速度不能超过源节点的发送速度
     # print("before tflow ", tflow)
@@ -392,17 +395,18 @@ def clear_graph(graph):
 
 # 更新边容量
 def update_edge(v, to, graph, flow, h, start_time):
+    flow_copy = flow.copy()
     for edge in graph[v]:
         if edge.to == to and edge.flag == 0:
             # 更新边容量以及剩余流量
-            flow = trans_edge_cap(edge, flow, h, start_time)
+            flow_copy = trans_edge_cap(edge, flow_copy, h, start_time)
 
             # 同时更新由无向边分裂的反向边容量使得容量相等
             for t_edge in graph[to]:
                 if t_edge.to == v and t_edge.flag == 0:
                     t_edge.capacity = edge.capacity
         if edge.to == to and edge.flag == 1:
-            flow = trans_edge_cap(edge, flow, h, start_time)
+            flow_copy = trans_edge_cap(edge, flow_copy, h, start_time)
 
     # print_graph(graph)
 
@@ -529,9 +533,10 @@ def main():
     target = 3
     start_time = 0
     end_time = 4
-    demand = 9
+    demand = 20
     # path = bfs(graph, source, target,node,5)
     max, left_flow, path, flag = edmonds_karp(graph, source, target, node, start_time,end_time,demand)
+    print("node_n:", node)
     print(max)
     print(left_flow)
     print(path)

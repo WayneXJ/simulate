@@ -72,10 +72,10 @@ def generate_multiple_matrices(node_list, num_matrices, rows, cols, base_dir):
 
 def main():
     # 示例用法
-    node_list = [6, 7, 8, 9]
+    node_list = [6, 7, 8, 9, 12, 20]
     num_matrices = 1  #矩阵个数
-    rows = 12
-    cols = 12
+    rows = 20
+    cols = 20
 
     generate_multiple_matrices(node_list, num_matrices, rows, cols, 'matrices')
 
